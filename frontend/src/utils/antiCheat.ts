@@ -50,8 +50,19 @@ export class AntiCheatMonitor {
 
   private setupClipboardMonitoring() {
     this.clipboardBlocker = (e: ClipboardEvent) => {
-      const action = e.type === 'copy' ? 'clipboard_copy' : 'clipboard_paste';
-      this.addViolation(action, `Clipboard ${action.replace('clipboard_', '')} detected`, 'high');
+      const action = e.type === 'copy' ? 'clipboard_copy' : e.type === 'paste' ? 'clipboard_paste' : 'clipboard_cut';
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true';
+      
+      // Allow clipboard operations in input fields for accessibility
+      if (isInInput) {
+        this.addViolation(action, `Clipboard ${action.replace('clipboard_', '')} detected in input field`, 'low');
+        // Don't prevent default for accessibility in input fields
+        return;
+      }
+      
+      // Block clipboard operations in assessment content area
+      this.addViolation(action, `Clipboard ${action.replace('clipboard_', '')} detected in assessment area`, 'high');
       e.preventDefault();
     };
 
@@ -102,9 +113,11 @@ export class AntiCheatMonitor {
   }
 
   private setupRightClickBlocking() {
-    const handleContextMenu = (e: MouseEvent) => {
+    const handleContextMenu = () => {
+      // Allow right-click for accessibility - screen readers and assistive technologies need this
       this.addViolation('right_click', 'Right click detected', 'low');
-      e.preventDefault();
+      // Don't prevent default for accessibility
+      // e.preventDefault(); // REMOVED for accessibility
     };
 
     document.addEventListener('contextmenu', handleContextMenu);
@@ -113,9 +126,27 @@ export class AntiCheatMonitor {
 
   private setupKeyboardShortcuts() {
     const handleKeydown = (e: KeyboardEvent) => {
-      // Block common keyboard shortcuts
-      if ((e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'a', 'p', 's', 'u'].includes(e.key)) {
-        this.addViolation('keyboard_shortcut', `Keyboard shortcut Ctrl+${e.key} detected`, 'high');
+      // Allow essential accessibility shortcuts
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true';
+      
+      // Allow Ctrl+A (Select All) for accessibility - only block in assessment context
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !isInInput) {
+        this.addViolation('keyboard_shortcut', `Keyboard shortcut Ctrl+A detected in assessment context`, 'low');
+        // Don't prevent default for accessibility
+        return;
+      }
+      
+      // Allow Ctrl+S (Save) - users expect to save their work
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        this.addViolation('keyboard_shortcut', `Keyboard shortcut Ctrl+S detected`, 'low');
+        // Don't prevent default - allow save functionality
+        return;
+      }
+
+      // Block potentially harmful shortcuts (copy, paste, print, view source)
+      if ((e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'p', 'u'].includes(e.key)) {
+        this.addViolation('keyboard_shortcut', `Keyboard shortcut Ctrl+${e.key} detected`, 'medium');
         e.preventDefault();
       }
 

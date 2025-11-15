@@ -181,29 +181,69 @@ const Timer: React.FC<TimerProps> = ({
   const isWarning = state.remainingSeconds <= 120;
   const isCritical = state.remainingSeconds <= 30;
 
+  // Generate ARIA label for time remaining
+  const getAriaLabel = () => {
+    const hours = Math.floor(state.remainingSeconds / 3600);
+    const minutes = Math.floor((state.remainingSeconds % 3600) / 60);
+    const seconds = state.remainingSeconds % 60;
+    
+    if (hours > 0) {
+      return `${hours} hours, ${minutes} minutes, ${seconds} seconds remaining`;
+    } else if (minutes > 0) {
+      return `${minutes} minutes, ${seconds} seconds remaining`;
+    } else {
+      return `${seconds} seconds remaining`;
+    }
+  };
+
+  // Generate live region text for critical time warnings
+  const getLiveRegionText = () => {
+    if (state.remainingSeconds === 0) return 'Time is up!';
+    if (state.remainingSeconds === 60) return 'Warning: 1 minute remaining';
+    if (state.remainingSeconds === 30) return 'Critical: 30 seconds remaining';
+    if (state.remainingSeconds === 10) return 'Critical: 10 seconds remaining';
+    if (state.remainingSeconds <= 5 && state.remainingSeconds > 0) return `${state.remainingSeconds} seconds remaining`;
+    return '';
+  };
+
   return (
-    <div className={`bg-white rounded-lg shadow-md p-4 ${className}`}>
+    <div className={`bg-white rounded-lg shadow-md p-4 ${className}`} role="timer" aria-label={label}>
+      {/* Live region for critical time announcements */}
+      <div 
+        className="sr-only" 
+        role="status" 
+        aria-live="assertive" 
+        aria-atomic="true"
+      >
+        {getLiveRegionText()}
+      </div>
+      
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center space-x-2">
-          <Clock className={`${getIconSize()} ${getTimeColor(state.remainingSeconds)}`} />
+          <Clock className={`${getIconSize()} ${getTimeColor(state.remainingSeconds)}`} aria-hidden="true" />
           <span className="text-sm font-medium text-gray-700">{label}</span>
         </div>
         
         <div className="flex items-center space-x-2">
           {isCritical && (
-            <AlertTriangle className="w-5 h-5 text-red-500 animate-pulse" />
+            <AlertTriangle className="w-5 h-5 text-red-500 animate-pulse" aria-hidden="true" />
           )}
-          <span className={`font-mono font-bold ${getTimeColor(state.remainingSeconds)} ${getSizeClasses()}`}>
+          <span 
+            className={`font-mono font-bold ${getTimeColor(state.remainingSeconds)} ${getSizeClasses()}`}
+            aria-label={getAriaLabel()}
+            role="text"
+          >
             {formatTime(state.remainingSeconds)}
           </span>
         </div>
       </div>
 
       {showProgress && (
-        <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+        <div className="w-full bg-gray-200 rounded-full h-2 mb-3" role="progressbar" aria-valuenow={state.remainingSeconds} aria-valuemin={0} aria-valuemax={state.totalSeconds} aria-label="Time remaining progress">
           <div
             className={`h-2 rounded-full transition-all duration-300 ${getProgressColor(state.remainingSeconds)}`}
             style={{ width: `${progressPercentage}%` }}
+            aria-hidden="true"
           />
         </div>
       )}

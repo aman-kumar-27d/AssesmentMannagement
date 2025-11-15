@@ -337,12 +337,54 @@ const TakeAssessment = () => {
     });
   };
 
+  // Validate assessment completion
+  const validateAssessmentCompletion = () => {
+    if (!assessment) return { isValid: true, warnings: [] };
+    
+    const warnings: string[] = [];
+    
+    // Check for unanswered MCQ questions
+    if (hasMCQs) {
+      assessment.questions.forEach((question, index) => {
+        if (question.type === 'mcq') {
+          const questionAnswered = selectedOptions[index] && selectedOptions[index].length > 0;
+          if (!questionAnswered) {
+            warnings.push(`Question ${index + 1}: ${question.questionText.substring(0, 50)}${question.questionText.length > 50 ? '...' : ''}`);
+          }
+        }
+      });
+    }
+    
+    // Check for empty code content if there are descriptive questions
+    const hasDescriptiveQuestions = assessment.questions.some(q => q.type === 'descriptive');
+    if (hasDescriptiveQuestions && content.trim() === '') {
+      warnings.push('Your code solution appears to be empty');
+    }
+    
+    return {
+      isValid: warnings.length === 0,
+      warnings
+    };
+  };
+
   // Handle submission
   const handleSubmit = async (isAutoSubmit = false) => {
     if (!user?.token || !id || !assessment) return;
     
-    // Show confirmation dialog if not already showing and not auto-submitting due to time expiration
+    // Validate assessment completion before showing confirmation
     if (!showConfirmSubmit && timeRemaining > 0 && !isAutoSubmit) {
+      const validation = validateAssessmentCompletion();
+      
+      if (!validation.isValid && validation.warnings.length > 0) {
+        // Show validation warnings
+        const warningMessage = `You have ${validation.warnings.length} incomplete item(s):\n\n${validation.warnings.map(w => `• ${w}`).join('\n')}\n\nDo you want to continue with submission anyway?`;
+        
+        if (!window.confirm(warningMessage)) {
+          return; // User chose to go back and complete the assessment
+        }
+      }
+      
+      // Show confirmation dialog if validation passed or user chose to continue
       setShowConfirmSubmit(true);
       return;
     }
@@ -400,6 +442,39 @@ const TakeAssessment = () => {
       showError('Submission Failed', err.message || 'Failed to submit assessment.');
     }
   };
+
+  // Handle modal close
+  const handleModalClose = useCallback(() => {
+    if (!isSubmitting) {
+      setShowConfirmSubmit(false);
+    }
+  }, [isSubmitting]);
+
+  // Handle escape key for modal
+  useEffect(() => {
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && showConfirmSubmit) {
+        handleModalClose();
+      }
+    };
+
+    if (showConfirmSubmit) {
+      document.addEventListener('keydown', handleEscapeKey);
+      // Prevent body scroll when modal is open
+      document.body.style.overflow = 'hidden';
+      
+      // Focus management: focus the confirm button when modal opens
+      const confirmButton = document.querySelector('[role="dialog"] button[autofocus]') as HTMLButtonElement;
+      if (confirmButton) {
+        confirmButton.focus();
+      }
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+      document.body.style.overflow = '';
+    };
+  }, [showConfirmSubmit, handleModalClose]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -552,45 +627,61 @@ const TakeAssessment = () => {
               
               {question.type === 'mcq' && question.options && (
                 <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select {question.options.filter(o => o.isCorrect).length > 1 ? 'all that apply' : 'one option'}:
-                  </label>
-                  <div className="space-y-2">
+                  <fieldset className="space-y-2">
+                    <legend className="block text-sm font-medium text-gray-700 mb-2">
+                      Select {question.options.filter(o => o.isCorrect).length > 1 ? 'all that apply' : 'one option'}:
+                    </legend>
                     {question.options.map((option, optionIndex) => {
                       const isSelected = selectedOptions[index]?.includes(option.text) || false;
+                      const inputType = question.options!.filter(o => o.isCorrect).length > 1 ? 'checkbox' : 'radio';
+                      const inputId = `question-${index}-option-${optionIndex}`;
                       
                       return (
-                        <div 
-                          key={optionIndex} 
-                          className={`p-3 border rounded-md cursor-pointer ${
-                            isSelected ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-gray-300'
-                          }`}
-                          onClick={() => handleOptionSelect(index, option.text)}
-                        >
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 mr-2">
-                              {question.options!.filter(o => o.isCorrect).length > 1 ? (
-                                <div className={`h-5 w-5 border ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'} rounded flex items-center justify-center`}>
-                                  {isSelected && (
-                                    <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                    </svg>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className={`h-5 w-5 border ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'} rounded-full flex items-center justify-center`}>
-                                  {isSelected && (
-                                    <div className="h-3 w-3 rounded-full bg-white"></div>
-                                  )}
-                                </div>
-                              )}
+                        <div key={optionIndex} className="relative">
+                          <input
+                            type={inputType}
+                            id={inputId}
+                            name={`question-${index}`}
+                            value={option.text}
+                            checked={isSelected}
+                            onChange={() => handleOptionSelect(index, option.text)}
+                            className="sr-only"
+                            aria-describedby={`${inputId}-label`}
+                          />
+                          <label
+                            htmlFor={inputId}
+                            className={`block p-3 border rounded-md cursor-pointer transition-colors ${
+                              isSelected 
+                                ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' 
+                                : 'hover:bg-gray-50 border-gray-300 hover:border-gray-400'
+                            }`}
+                            id={`${inputId}-label`}
+                          >
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 mr-3">
+                                {inputType === 'checkbox' ? (
+                                  <div className={`h-5 w-5 border ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'} rounded flex items-center justify-center transition-colors`}>
+                                    {isSelected && (
+                                      <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={`h-5 w-5 border ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'} rounded-full flex items-center justify-center transition-colors`}>
+                                    {isSelected && (
+                                      <div className="h-3 w-3 rounded-full bg-white"></div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-gray-700 flex-1">{option.text}</span>
                             </div>
-                            <span className="text-gray-700">{option.text}</span>
-                          </div>
+                          </label>
                         </div>
                       );
                     })}
-                  </div>
+                  </fieldset>
                 </div>
               )}
             </div>
@@ -616,32 +707,53 @@ const TakeAssessment = () => {
               isSubmitting ? 'opacity-75 cursor-not-allowed' : ''
             }`}
           >
-            {isSubmitting ? 'Submitting...' : showConfirmSubmit ? 'Confirm Submission' : 'Submit Assessment'}
+            {isSubmitting ? 'Submitting...' : 'Submit Assessment'}
           </button>
         </div>
 
         {/* Confirmation dialog */}
         {showConfirmSubmit && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 max-w-md w-full">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Confirm Submission</h3>
-              <p className="text-gray-700 mb-6">
+          <div 
+            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-submission-title"
+            aria-describedby="confirm-submission-description"
+            onClick={handleModalClose}
+          >
+            <div 
+              className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 
+                id="confirm-submission-title"
+                className="text-lg font-medium text-gray-900 mb-4"
+              >
+                Confirm Submission
+              </h3>
+              <p 
+                id="confirm-submission-description"
+                className="text-gray-700 mb-6"
+              >
                 Are you sure you want to submit your assessment? You cannot make changes after submission.
               </p>
               <div className="flex justify-end space-x-4">
                 <button
-                  onClick={() => setShowConfirmSubmit(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  onClick={handleModalClose}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
                   disabled={isSubmitting}
+                  type="button"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => handleSubmit()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   disabled={isSubmitting}
+                  type="button"
+                  autoFocus
                 >
-                  {isSubmitting ? 'Submitting...' : 'Submit'}
+                  {isSubmitting ? 'Submitting...' : 'Confirm Submit'}
                 </button>
               </div>
             </div>
