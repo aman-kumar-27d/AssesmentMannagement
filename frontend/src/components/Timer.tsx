@@ -36,7 +36,7 @@ const Timer: React.FC<TimerProps> = ({
 }) => {
   const [state, setState] = useState<TimerState>({
     remainingSeconds: totalSeconds,
-    isRunning: false,
+    isRunning: true, // Auto-start timer
     isPaused: false,
     totalSeconds,
     timeSpent: 0,
@@ -129,7 +129,9 @@ const Timer: React.FC<TimerProps> = ({
     }
   }, [autoPauseOnBlur]);
 
+  // Removed manual timer controls - timer is now strictly controlled by assessment logic
   const start = () => {
+    // Timer auto-starts, this function is deprecated but kept for compatibility
     setState(prev => ({
       ...prev,
       isRunning: true,
@@ -138,21 +140,15 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   const pause = () => {
-    setState(prev => ({
-      ...prev,
-      isPaused: !prev.isPaused,
-    }));
+    // Timer cannot be manually paused during assessment
+    // This function is deprecated but kept for compatibility
+    console.warn('Manual timer pause is not allowed during assessment');
   };
 
   const reset = () => {
-    setState({
-      remainingSeconds: totalSeconds,
-      isRunning: false,
-      isPaused: false,
-      totalSeconds,
-      timeSpent: 0,
-    });
-    setWarningsTriggered(new Set());
+    // Timer cannot be manually reset during assessment
+    // This function is deprecated but kept for compatibility
+    console.warn('Manual timer reset is not allowed during assessment');
   };
 
   const getSizeClasses = () => {
@@ -253,32 +249,11 @@ const Timer: React.FC<TimerProps> = ({
         <span>Total: {formatTime(state.totalSeconds)}</span>
       </div>
 
+      {/* Timer controls removed - assessment timer is strictly controlled and cannot be manually modified */}
       <div className="flex justify-center space-x-2">
-        {!state.isRunning ? (
-          <button
-            onClick={start}
-            className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <Play className="w-4 h-4" />
-            <span>Start</span>
-          </button>
-        ) : (
-          <button
-            onClick={pause}
-            className="flex items-center space-x-1 px-3 py-1 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-          >
-            {state.isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-            <span>{state.isPaused ? 'Resume' : 'Pause'}</span>
-          </button>
-        )}
-        
-        <button
-          onClick={reset}
-          className="flex items-center space-x-1 px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>Reset</span>
-        </button>
+        <div className="text-xs text-gray-500 px-3 py-1">
+          Timer is strictly controlled during assessment
+        </div>
       </div>
 
       {isWarning && (

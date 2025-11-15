@@ -7,6 +7,7 @@ import Timer from '../components/Timer';
 import NotificationContainer from '../components/NotificationContainer';
 import { createAntiCheatMonitor, AntiCheatViolation } from '../utils/antiCheat';
 import { showSuccess, showError, showWarning } from '../utils/messaging';
+import { assessmentLogger } from '../utils/assessmentLogger';
 
 interface QuestionOption {
   text: string;
@@ -306,6 +307,9 @@ const TakeAssessment = () => {
         setTabSwitches(newTabSwitches);
         // Update session storage
         sessionStorage.setItem(SESSION_KEYS.TAB_SWITCHES, newTabSwitches.toString());
+        
+        // Log tab switch event
+        assessmentLogger.logAssessmentEvent(id || '', user?._id || '', 'TAB_SWITCH', `Tab switch detected. Total: ${newTabSwitches}`);
       }
     };
 
@@ -314,7 +318,7 @@ const TakeAssessment = () => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [tabSwitches]);
+  }, [tabSwitches, id, user?._id]);
 
   // Handle MCQ option selection
   const handleOptionSelect = (questionIndex: number, optionText: string) => {
@@ -367,7 +371,7 @@ const TakeAssessment = () => {
     };
   };
 
-  // Handle submission
+  // Handle submission with fullscreen recovery
   const handleSubmit = async (isAutoSubmit = false) => {
     if (!user?.token || !id || !assessment) return;
     
@@ -391,6 +395,21 @@ const TakeAssessment = () => {
     
     try {
       setIsSubmitting(true);
+      
+      // Exit fullscreen mode if active
+      if (antiCheatMonitor.current?.isInFullscreen()) {
+        await antiCheatMonitor.current.exitFullscreen();
+        
+        // Verify viewport restoration
+        setTimeout(() => {
+          if (document.fullscreenElement) {
+            console.error('Fullscreen exit failed, forcing exit');
+            document.exitFullscreen().catch(err => {
+              console.error('Forced fullscreen exit failed:', err);
+            });
+          }
+        }, 100);
+      }
       
       // Prepare submission data
       let submissionContent = content;
@@ -433,13 +452,31 @@ const TakeAssessment = () => {
       // Show success message
       showSuccess('Assessment Submitted', 'Your assessment has been successfully submitted!');
       
-      // Redirect to results page after submission
-      navigate('/results');
+      // Verify UI restoration before navigation
+      setTimeout(() => {
+        // Ensure all UI elements are properly restored
+        document.body.style.overflow = ''; // Restore scrolling
+        document.body.style.padding = ''; // Remove any fullscreen padding
+        
+        // Redirect to results page after submission
+        navigate('/results');
+      }, 500); // Small delay to ensure UI restoration
+      
     } catch (err: any) {
       setError(err.message || 'Failed to submit assessment.');
       setShowConfirmSubmit(false);
       setIsSubmitting(false);
       showError('Submission Failed', err.message || 'Failed to submit assessment.');
+      
+      // Log detailed error for debugging
+      const currentViolations = antiCheatMonitor.current?.getViolations() || antiCheatViolations;
+      const currentActivities = antiCheatMonitor.current?.getActivities() || [];
+      assessmentLogger.logSubmissionError(id || '', user?._id || '', err, {
+        timeRemaining,
+        tabSwitches: tabSwitches,
+        violations: currentViolations.length,
+        activities: currentActivities.length
+      });
     }
   };
 
@@ -563,7 +600,7 @@ const TakeAssessment = () => {
           </div>
         )}
 
-        {/* Advanced Timer Component */}
+        {/* Advanced Timer Component - Auto-starts when assessment begins */}
         <div className="mb-6">
           <Timer
             totalSeconds={timeRemaining}
@@ -658,7 +695,7 @@ const TakeAssessment = () => {
                             id={`${inputId}-label`}
                           >
                             <div className="flex items-center">
-                              <div className="flex-shrink-0 mr-3">
+                              <div className="shrink-0 mr-3">
                                 {inputType === 'checkbox' ? (
                                   <div className={`h-5 w-5 border ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'} rounded flex items-center justify-center transition-colors`}>
                                     {isSelected && (

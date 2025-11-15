@@ -239,6 +239,25 @@ export class AntiCheatMonitor {
     return document.exitFullscreen().then(() => {
       this.isFullscreen = false;
       this.addActivity('fullscreen_exited', 'Fullscreen mode exited');
+      
+      // Add additional verification and cleanup
+      setTimeout(() => {
+        // Force any remaining fullscreen elements to exit
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => {
+            console.error('Secondary fullscreen exit failed:', err);
+          });
+        }
+        
+        // Ensure viewport is properly restored
+        document.body.style.overflow = '';
+        document.body.style.padding = '';
+        document.documentElement.style.overflow = '';
+      }, 100);
+    }).catch(err => {
+      console.error('Fullscreen exit failed:', err);
+      this.addViolation('window_resize', `Failed to exit fullscreen: ${err.message}`, 'medium');
+      throw err;
     });
   }
 

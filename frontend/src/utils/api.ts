@@ -522,7 +522,8 @@ export const submitAssessment = async (
   antiCheatViolations?: any[],
   sessionActivities?: any[],
   startTime?: string,
-  endTime?: string
+  endTime?: string,
+  questionNotes?: Record<string, string>
 ) => {
   try {
     const response = await fetch(`${API_URL}/submissions`, {
@@ -539,7 +540,8 @@ export const submitAssessment = async (
         antiCheatViolations,
         sessionActivities,
         startTime,
-        endTime
+        endTime,
+        questionNotes
       }),
     });
     
