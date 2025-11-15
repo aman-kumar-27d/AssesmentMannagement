@@ -109,28 +109,6 @@ const logger = winston.createLogger({
       maxFiles: '30d',
       format: logFormat
     })
-  ],
-  
-  // Handle uncaught exceptions
-  exceptionHandlers: [
-    new DailyRotateFile({
-      filename: path.join(logsDir, 'exceptions-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '30d',
-      format: logFormat
-    })
-  ],
-  
-  // Handle unhandled promise rejections
-  rejectionHandlers: [
-    new DailyRotateFile({
-      filename: path.join(logsDir, 'rejections-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '30d',
-      format: logFormat
-    })
   ]
 });
 

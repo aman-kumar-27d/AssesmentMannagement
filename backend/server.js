@@ -1,15 +1,3 @@
-// Global error handlers at the very beginning
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION at startup:', err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('UNHANDLED REJECTION at startup:', reason);
-  process.exit(1);
-});
-
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
@@ -45,7 +33,7 @@ const limiter = rateLimit({
   max: 100, // limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.'
 });
-app.use('/api/', limiter);
+app.use('/api', limiter);
 
 // Body parser middleware
 app.use(express.json({ limit: '10mb' }));
@@ -59,13 +47,7 @@ app.use(cors({
 
 // Request logging middleware
 app.use((req, res, next) => {
-  logger.info('Incoming Request:', {
-    method: req.method,
-    url: req.originalUrl,
-    ip: req.ip,
-    userAgent: req.get('user-agent'),
-    timestamp: new Date().toISOString()
-  });
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
@@ -78,12 +60,21 @@ app.use('/api/errors', errorRoutes);
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'success',
-    message: 'Welcome to the Secure Notepad Assessment Platform API',
-    version: '2.0.0',
-    timestamp: new Date().toISOString()
-  });
+  try {
+    console.log('Root route handler called');
+    const response = { 
+      status: 'success',
+      message: 'Welcome to the Secure Notepad Assessment Platform API',
+      version: '2.0.0',
+      timestamp: new Date().toISOString()
+    };
+    console.log('Sending response:', response);
+    res.json(response);
+    console.log('Response sent');
+  } catch (error) {
+    console.error('Error in root route:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Health check endpoint
@@ -101,33 +92,27 @@ app.use(notFound);
 // Global error handling middleware
 app.use(globalErrorHandler);
 
+// Declare server variable in outer scope
+let server;
+
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
-  logger.error('UNHANDLED REJECTION! 💥 Shutting down...', {
+  console.error('UNHANDLED REJECTION:', err);
+  logger.error('UNHANDLED REJECTION!', {
     error: err.message,
     stack: err.stack,
     timestamp: new Date().toISOString()
   });
-  
-  // Close server & exit process
-  if (server && server.close) {
-    server.close(() => {
-      process.exit(1);
-    });
-  } else {
-    process.exit(1);
-  }
 });
 
-// Handle uncaught exceptions
+// Handle uncaught exceptions  
 process.on('uncaughtException', (err) => {
-  logger.error('UNCAUGHT EXCEPTION! 💥 Shutting down...', {
+  console.error('UNCAUGHT EXCEPTION:', err);
+  logger.error('UNCAUGHT EXCEPTION!', {
     error: err.message,
     stack: err.stack,
     timestamp: new Date().toISOString()
   });
-  
-  process.exit(1);
 });
 
 // Start server after database connection
@@ -136,7 +121,7 @@ const startServer = async () => {
     await connectDB();
     
     const PORT = process.env.PORT || 5000;
-    const server = app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`, {
         port: PORT,
         environment: process.env.NODE_ENV || 'development',
