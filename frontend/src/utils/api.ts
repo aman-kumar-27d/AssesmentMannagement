@@ -1,35 +1,61 @@
+import { 
+  handleApiError, 
+  handleNetworkError, 
+  createFrontendError,
+  displayError 
+} from './errorHandler';
+
 // Base API URL
 const API_URL = 'http://localhost:5000/api';
 
-// User Authentication API
-export const registerUser = async (userData: any) => {
+// Enhanced fetch wrapper with error handling
+const apiFetch = async (url: string, options: RequestInit = {}) => {
   try {
-    const response = await fetch(`${API_URL}/users/register`, {
-      method: 'POST',
+    const response = await fetch(url, {
+      ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...options.headers,
       },
-      body: JSON.stringify(userData),
     });
-    
-    // Check if the response is JSON
+
+    // Handle non-JSON responses
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
       const text = await response.text();
-      throw new Error('Server returned non-JSON response: ' + (text.substring(0, 100) + '...'));
+      throw createFrontendError('INVALID_FORMAT', `Server returned non-JSON response: ${text.substring(0, 100)}...`);
     }
-    
+
     const data = await response.json();
-    
+
     if (!response.ok) {
-      throw new Error(data.message || 'Registration failed');
+      // Use the enhanced error handler for API errors
+      throw await handleApiError(response);
     }
-    
+
     return data;
   } catch (error) {
-    console.error('Registration error:', error);
-    throw error;
+    // Handle network errors
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw handleNetworkError(error);
+    }
+    
+    // Re-throw if it's already a handled error
+    if (error.name === 'FrontendError') {
+      throw error;
+    }
+    
+    // Handle other unexpected errors
+    throw handleNetworkError(error);
   }
+};
+
+// User Authentication API
+export const registerUser = async (userData: any) => {
+  return apiFetch(`${API_URL}/users/register`, {
+    method: 'POST',
+    body: JSON.stringify(userData),
+  });
 };
 
 export const registerAdmin = async (userData: any) => {
