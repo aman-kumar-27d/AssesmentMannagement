@@ -1,12 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getAssessmentById, submitAssessment } from '../utils/api';
 import SecureNotepad from '../components/SecureNotepad';
+import Timer from '../components/Timer';
+import NotificationContainer from '../components/NotificationContainer';
+import { createAntiCheatMonitor, AntiCheatViolation, SessionActivity } from '../utils/antiCheat';
+import { showSuccess, showError, showWarning } from '../utils/messaging';
 
 interface QuestionOption {
   text: string;
   isCorrect?: boolean; // We don't send isCorrect to the frontend
+  points?: number;
 }
 
 interface Question {
@@ -16,8 +21,12 @@ interface Question {
   maxPoints: number;
   categoryId?: string;
   categoryName?: string;
-  type: 'descriptive' | 'mcq';
+  type: 'descriptive' | 'mcq' | 'multiple_select';
   options?: QuestionOption[];
+  timeLimit?: number; // in seconds
+  difficulty?: 'easy' | 'medium' | 'hard';
+  negativeMarking?: boolean;
+  negativeMarks?: number;
 }
 
 interface Assessment {
@@ -26,6 +35,13 @@ interface Assessment {
   description: string;
   timeLimit: number; // in minutes
   questions: Question[];
+  passingScore?: number;
+  shuffleQuestions?: boolean;
+  shuffleOptions?: boolean;
+  antiCheatEnabled?: boolean;
+  maxAttempts?: number;
+  allowReview?: boolean;
+  showCorrectAnswers?: boolean;
 }
 
 const SESSION_KEYS = {
@@ -43,6 +59,8 @@ const TakeAssessment = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const hasInitialized = useRef(false);
+  const antiCheatMonitor = useRef<ReturnType<typeof createAntiCheatMonitor> | null>(null);
+  const startTimeRef = useRef<Date | null>(null);
 
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [content, setContent] = useState('');
@@ -55,6 +73,30 @@ const TakeAssessment = () => {
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
   const [hasMCQs, setHasMCQs] = useState(false);
   const [pageReloaded, setPageReloaded] = useState(false);
+  const [antiCheatViolations, setAntiCheatViolations] = useState<AntiCheatViolation[]>([]);
+  const [sessionActivities, setSessionActivities] = useState<SessionActivity[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [questionTimers, setQuestionTimers] = useState<Record<number, number>>({});
+
+  // Initialize anti-cheat monitoring
+  const handleAntiCheatViolation = useCallback((violation: AntiCheatViolation) => {
+    setAntiCheatViolations(prev => [...prev, violation]);
+    
+    // Show appropriate warning based on severity
+    switch (violation.severity) {
+      case 'critical':
+        showError('Security Violation', violation.details);
+        break;
+      case 'high':
+        showWarning('Security Warning', violation.details);
+        break;
+      case 'medium':
+        showWarning('Notice', violation.details);
+        break;
+      default:
+        console.warn('Anti-cheat violation:', violation);
+    }
+  }, []);
 
   // Check if this is a page reload - this runs only once when component mounts
   useEffect(() => {
@@ -119,7 +161,45 @@ const TakeAssessment = () => {
     
     const isReload = checkReload();
     setPageReloaded(isReload);
-  }, [id]); // Only depend on id, not any state variables
+  }, [id, handleAntiCheatViolation]); // Only depend on id, not any state variables
+
+  // Initialize anti-cheat monitoring when assessment loads
+  useEffect(() => {
+    if (assessment && assessment.antiCheatEnabled && !antiCheatMonitor.current) {
+      antiCheatMonitor.current = createAntiCheatMonitor(handleAntiCheatViolation);
+      
+      // Request fullscreen if enabled
+      if (assessment.antiCheatEnabled) {
+        antiCheatMonitor.current.requestFullscreen().then(() => {
+          setIsFullscreen(true);
+        }).catch(err => {
+          console.warn('Fullscreen request denied:', err);
+        });
+      }
+    }
+
+    return () => {
+      if (antiCheatMonitor.current) {
+        antiCheatMonitor.current.destroy();
+        antiCheatMonitor.current = null;
+      }
+    };
+  }, [assessment, handleAntiCheatViolation]);
+
+  // Handle time warnings
+  const handleTimeWarning = useCallback((remainingSeconds: number) => {
+    if (remainingSeconds <= 60) {
+      showWarning('Time Warning', `Only ${remainingSeconds} seconds remaining!`);
+    } else if (remainingSeconds <= 300) {
+      showWarning('Time Warning', `Only ${Math.floor(remainingSeconds / 60)} minutes remaining!`);
+    }
+  }, []);
+
+  // Handle time up
+  const handleTimeUp = useCallback(() => {
+    showError('Time\'s Up!', 'The assessment time has expired. Your submission will be automatically submitted.');
+    handleSubmit(true);
+  }, []);
 
   // Fetch assessment details - this should only depend on user and id
   useEffect(() => {
@@ -292,13 +372,27 @@ const TakeAssessment = () => {
       if (hasMCQs && content.trim() === '') {
         submissionContent = "MCQ Assessment Submission";
       }
+
+      // Get anti-cheat data from monitor
+      const violations = antiCheatMonitor.current?.getViolations() || antiCheatViolations;
+      const activities = antiCheatMonitor.current?.getActivities() || sessionActivities;
+      const finalTabSwitches = antiCheatMonitor.current?.getTabSwitchCount() || tabSwitches;
+      
+      // Calculate time spent
+      const startTime = startTimeRef.current || new Date(sessionStorage.getItem(SESSION_KEYS.START_TIME) || Date.now());
+      const endTime = new Date();
+      const timeSpent = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
       
       await submitAssessment(
         user.token,
         id,
         submissionContent,
-        tabSwitches,
-        hasMCQs ? selectedOptions : undefined
+        finalTabSwitches,
+        hasMCQs ? selectedOptions : undefined,
+        violations,
+        activities,
+        startTime.toISOString(),
+        endTime.toISOString()
       );
       
       // Clear session storage after successful submission
@@ -310,12 +404,16 @@ const TakeAssessment = () => {
       sessionStorage.removeItem(SESSION_KEYS.CONTENT);
       // Keep the initial visit flag so we can detect actual page reloads
       
+      // Show success message
+      showSuccess('Assessment Submitted', 'Your assessment has been successfully submitted!');
+      
       // Redirect to results page after submission
       navigate('/results');
     } catch (err: any) {
       setError(err.message || 'Failed to submit assessment.');
       setShowConfirmSubmit(false);
       setIsSubmitting(false);
+      showError('Submission Failed', err.message || 'Failed to submit assessment.');
     }
   };
 
@@ -373,6 +471,9 @@ const TakeAssessment = () => {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* Notification Container */}
+      <NotificationContainer />
+      
       {/* Fixed header with timer */}
       <div className="fixed top-0 left-0 right-0 bg-white z-10 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -382,7 +483,7 @@ const TakeAssessment = () => {
             </h1>
             <div className="flex items-center space-x-4">
               <div className="text-sm text-gray-500">
-                Tab Switches: {tabSwitches}
+                Tab Switches: {antiCheatMonitor.current?.getTabSwitchCount() || tabSwitches}
               </div>
               <div className={`text-sm font-medium px-3 py-1 rounded-full ${
                 timeRemaining < 60 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
@@ -402,6 +503,20 @@ const TakeAssessment = () => {
             <p>Please avoid refreshing the page during an assessment. Your progress has been preserved.</p>
           </div>
         )}
+
+        {/* Advanced Timer Component */}
+        <div className="mb-6">
+          <Timer
+            totalSeconds={timeRemaining}
+            onTimeUp={handleTimeUp}
+            onTimeWarning={handleTimeWarning}
+            warningThresholds={[300, 120, 60, 30]}
+            autoPauseOnBlur={assessment?.antiCheatEnabled}
+            showProgress={true}
+            size="large"
+            label="Assessment Time Remaining"
+          />
+        </div>
         
         <div className="mb-8">
           <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -415,6 +530,14 @@ const TakeAssessment = () => {
                 <div className="mt-4 p-3 bg-yellow-50 border-l-4 border-yellow-400">
                   <p className="text-sm text-yellow-700">
                     <strong>Warning:</strong> You have switched tabs {tabSwitches} time(s). This will be recorded with your submission.
+                  </p>
+                </div>
+              )}
+
+              {antiCheatViolations.length > 0 && (
+                <div className="mt-4 p-3 bg-red-50 border-l-4 border-red-400">
+                  <p className="text-sm text-red-700">
+                    <strong>Security Notice:</strong> {antiCheatViolations.length} security violation(s) detected.
                   </p>
                 </div>
               )}

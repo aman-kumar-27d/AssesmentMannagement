@@ -1,12 +1,73 @@
 const Submission = require('../models/Submission');
 const Assessment = require('../models/Assessment');
 
+// Helper function to calculate MCQ score
+const calculateMCQScore = (assessment, mcqAnswers) => {
+  let totalScore = 0;
+  let maxPossibleScore = 0;
+  const mcqResponses = [];
+
+  assessment.questions.forEach((question, index) => {
+    if (question.type === 'mcq' || question.type === 'multiple_select') {
+      const userAnswers = mcqAnswers[index] || [];
+      const correctOptions = question.options.filter(opt => opt.isCorrect);
+      maxPossibleScore += question.maxPoints;
+
+      let isCorrect = false;
+      let pointsEarned = 0;
+
+      if (question.type === 'mcq') {
+        // Single choice MCQ
+        const userAnswer = userAnswers[0] || '';
+        const correctAnswer = correctOptions[0]?.text || '';
+        isCorrect = userAnswer === correctAnswer;
+        pointsEarned = isCorrect ? question.maxPoints : (question.negativeMarking ? -question.negativeMarks : 0);
+      } else if (question.type === 'multiple_select') {
+        // Multiple select MCQ
+        const correctAnswers = correctOptions.map(opt => opt.text);
+        const userSelectedCorrect = userAnswers.filter(answer => correctAnswers.includes(answer));
+        const userSelectedIncorrect = userAnswers.filter(answer => !correctAnswers.includes(answer));
+        
+        if (userSelectedIncorrect.length === 0 && userSelectedCorrect.length === correctAnswers.length) {
+          // All correct answers selected, no incorrect ones
+          isCorrect = true;
+          pointsEarned = question.maxPoints;
+        } else if (question.negativeMarking) {
+          // Partial negative marking
+          const correctPoints = (userSelectedCorrect.length / correctAnswers.length) * question.maxPoints;
+          const incorrectPenalty = userSelectedIncorrect.length * question.negativeMarks;
+          pointsEarned = Math.max(0, correctPoints - incorrectPenalty);
+        } else {
+          // No negative marking, partial credit
+          pointsEarned = (userSelectedCorrect.length / correctAnswers.length) * question.maxPoints;
+        }
+      }
+
+      totalScore += pointsEarned;
+
+      mcqResponses.push({
+        questionIndex: index,
+        selectedOptions: userAnswers,
+        isCorrect,
+        pointsEarned,
+        maxPoints: question.maxPoints
+      });
+    }
+  });
+
+  return {
+    mcqScore: Math.max(0, totalScore),
+    maxPossibleScore,
+    mcqResponses
+  };
+};
+
 // @desc    Create a new submission
 // @route   POST /api/submissions
 // @access  Private
 const createSubmission = async (req, res) => {
   try {
-    const { assessmentId, content, tabSwitches, multipleChoiceAnswers } = req.body;
+    const { assessmentId, content, tabSwitches, multipleChoiceAnswers, antiCheatViolations, sessionActivities, startTime, endTime } = req.body;
 
     // Check if required fields are provided
     if (!assessmentId || !content) {
@@ -24,24 +85,31 @@ const createSubmission = async (req, res) => {
       return res.status(400).json({ message: 'This assessment is no longer active' });
     }
 
-    // Check if user already submitted
-    const existingSubmission = await Submission.findOne({
+    // Check attempt limit
+    const previousSubmissions = await Submission.find({
       user: req.user._id,
       assessment: assessmentId,
     });
 
-    if (existingSubmission) {
-      return res.status(400).json({ message: 'You have already submitted this assessment' });
+    if (previousSubmissions.length >= assessment.maxAttempts) {
+      return res.status(400).json({ message: `You have reached the maximum attempt limit of ${assessment.maxAttempts}` });
     }
 
-    // Convert multipleChoiceAnswers to a format suitable for MongoDB storage
-    let mcqResponses = {};
-    if (multipleChoiceAnswers && typeof multipleChoiceAnswers === 'object') {
-      // Copy the object rather than directly assigning to avoid reference issues
-      Object.keys(multipleChoiceAnswers).forEach(key => {
-        mcqResponses[key] = multipleChoiceAnswers[key];
-      });
+    // Calculate MCQ score if applicable
+    let mcqScore = 0;
+    let maxPossibleScore = 0;
+    let mcqResponses = [];
+
+    if (multipleChoiceAnswers && Object.keys(multipleChoiceAnswers).length > 0) {
+      const scoringResult = calculateMCQScore(assessment, multipleChoiceAnswers);
+      mcqScore = scoringResult.mcqScore;
+      maxPossibleScore = scoringResult.maxPossibleScore;
+      mcqResponses = scoringResult.mcqResponses;
     }
+
+    // Calculate total score (MCQ + descriptive questions)
+    const descriptiveScore = assessment.questions.filter(q => q.type === 'descriptive').length > 0 ? 0 : 0; // Will be manually evaluated
+    const totalScore = mcqScore + descriptiveScore;
 
     // Create new submission
     const submission = await Submission.create({
@@ -49,12 +117,23 @@ const createSubmission = async (req, res) => {
       assessment: assessmentId,
       content,
       mcqResponses,
+      mcqScore,
+      totalScore,
+      maxPossibleScore,
       tabSwitches: tabSwitches || 0,
+      antiCheatViolations: antiCheatViolations || [],
+      sessionActivities: sessionActivities || [],
+      startTime: startTime ? new Date(startTime) : undefined,
+      endTime: endTime ? new Date(endTime) : undefined,
+      timeSpent: startTime && endTime ? Math.floor((new Date(endTime) - new Date(startTime)) / 1000) : 0,
+      attemptNumber: previousSubmissions.length + 1,
+      evaluationStatus: mcqResponses.length > 0 && descriptiveScore === 0 ? 'auto_evaluated' : 'pending',
+      grade: mcqResponses.length > 0 && descriptiveScore === 0 ? Math.round((totalScore / maxPossibleScore) * 100) : undefined,
     });
 
     res.status(201).json(submission);
   } catch (error) {
-    console.error(error);
+    console.error('Submission creation error:', error);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

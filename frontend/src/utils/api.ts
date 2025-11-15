@@ -488,7 +488,17 @@ export const getSubmissionById = async (token: string, submissionId: string) => 
   }
 };
 
-export const submitAssessment = async (token: string, assessmentId: string, content: string, tabSwitches?: number, multipleChoiceAnswers?: Record<string, string[]>) => {
+export const submitAssessment = async (
+  token: string, 
+  assessmentId: string, 
+  content: string, 
+  tabSwitches?: number, 
+  multipleChoiceAnswers?: Record<string, string[]>,
+  antiCheatViolations?: any[],
+  sessionActivities?: any[],
+  startTime?: string,
+  endTime?: string
+) => {
   try {
     const response = await fetch(`${API_URL}/submissions`, {
       method: 'POST',
@@ -496,7 +506,16 @@ export const submitAssessment = async (token: string, assessmentId: string, cont
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ assessmentId, content, tabSwitches, multipleChoiceAnswers }),
+      body: JSON.stringify({ 
+        assessmentId, 
+        content, 
+        tabSwitches, 
+        multipleChoiceAnswers,
+        antiCheatViolations,
+        sessionActivities,
+        startTime,
+        endTime
+      }),
     });
     
     // Check if the response is JSON
