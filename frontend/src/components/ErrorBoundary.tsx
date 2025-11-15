@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home, Mail } from 'lucide-react';
 import { logErrorToService } from '../utils/errorHandler';
 import { useMessageStore } from '../utils/messaging';
@@ -54,8 +54,7 @@ class ErrorBoundary extends Component<Props, State> {
       type: 'error',
       title: 'Application Error',
       message: 'An unexpected error occurred. The development team has been notified.',
-      duration: 10000,
-      dismissible: true
+      duration: 10000
     });
   }
 
@@ -111,7 +110,7 @@ Please describe what you were doing when this error occurred:
                 We're sorry, but something unexpected happened. Our team has been notified and will work to fix this issue.
               </p>
 
-              {process.env.NODE_ENV === 'development' && (
+              {import.meta.env.DEV && (
                 <div className="bg-gray-100 rounded-lg p-4 mb-6 text-left">
                   <h3 className="text-sm font-medium text-gray-900 mb-2">Error Details:</h3>
                   <p className="text-xs text-gray-600 mb-2">

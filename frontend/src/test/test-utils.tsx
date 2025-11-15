@@ -21,6 +21,7 @@ interface AuthContextType {
   logout: () => void;
   register: (userId: string, email: string, password: string) => Promise<void>;
   registerAdmin: (userId: string, email: string, password: string, adminSecret?: string) => Promise<void>;
+  setUser: (user: User | null) => void;
 }
 
 // Define default mock auth context
@@ -31,7 +32,8 @@ const defaultAuthContext: AuthContextType = {
   login: vi.fn(),
   logout: vi.fn(),
   register: vi.fn(),
-  registerAdmin: vi.fn()
+  registerAdmin: vi.fn(),
+  setUser: vi.fn()
 };
 
 interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {

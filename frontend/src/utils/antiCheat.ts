@@ -16,12 +16,10 @@ export class AntiCheatMonitor {
   private activities: SessionActivity[] = [];
   private tabSwitchCount = 0;
   private isFullscreen = false;
-  private lastActivityTime = Date.now();
   private inactivityThreshold = 30000; // 30 seconds
-  private inactivityTimer: NodeJS.Timeout | null = null;
+  private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners: Map<string, EventListener> = new Map();
   private clipboardBlocker: ((e: ClipboardEvent) => void) | null = null;
-  private screenshotProtection: boolean = false;
 
   constructor(private onViolation: (violation: AntiCheatViolation) => void) {
     this.startMonitoring();
@@ -68,7 +66,6 @@ export class AntiCheatMonitor {
     const ctx = canvas.getContext('2d');
     if (ctx) {
       // Add watermark or overlay to prevent screenshots
-      this.screenshotProtection = true;
       this.addActivity('screenshot_protection_enabled', 'Screenshot protection activated');
     }
 
@@ -81,12 +78,11 @@ export class AntiCheatMonitor {
     };
 
     document.addEventListener('keydown', handleKeydown);
-    this.listeners.set('keydown_screenshot', handleKeydown);
+    this.listeners.set('keydown_screenshot', handleKeydown as EventListener);
   }
 
   private setupInactivityDetection() {
     const resetInactivityTimer = () => {
-      this.lastActivityTime = Date.now();
       if (this.inactivityTimer) {
         clearTimeout(this.inactivityTimer);
       }
@@ -112,7 +108,7 @@ export class AntiCheatMonitor {
     };
 
     document.addEventListener('contextmenu', handleContextMenu);
-    this.listeners.set('contextmenu', handleContextMenu);
+    this.listeners.set('contextmenu', handleContextMenu as EventListener);
   }
 
   private setupKeyboardShortcuts() {
@@ -137,7 +133,7 @@ export class AntiCheatMonitor {
     };
 
     document.addEventListener('keydown', handleKeydown);
-    this.listeners.set('keydown_shortcuts', handleKeydown);
+    this.listeners.set('keydown_shortcuts', handleKeydown as EventListener);
   }
 
   private setupFullscreenDetection() {
@@ -153,7 +149,7 @@ export class AntiCheatMonitor {
   }
 
   private setupWindowResizeDetection() {
-    let resizeTimer: NodeJS.Timeout;
+    let resizeTimer: ReturnType<typeof setTimeout>;
     const handleResize = () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {

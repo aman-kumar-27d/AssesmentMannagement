@@ -44,7 +44,7 @@ const apiFetch = async (url: string, options: RequestInit = {}, timeout = 30000)
     clearTimeout(timeoutId);
     
     // Handle aborted requests (timeout)
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       throw createFrontendError('TIMEOUT_ERROR', 'Request timeout');
     }
     
@@ -54,7 +54,7 @@ const apiFetch = async (url: string, options: RequestInit = {}, timeout = 30000)
     }
     
     // Re-throw if it's already a handled error
-    if (error.name === 'FrontendError') {
+    if (error instanceof Error && error.name === 'FrontendError') {
       throw error;
     }
     

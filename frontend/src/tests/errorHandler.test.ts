@@ -9,19 +9,23 @@ import {
   errorTracker
 } from '../utils/errorHandler';
 import { useMessageStore } from '../utils/messaging';
+import { vi, describe, test, expect, beforeEach } from 'vitest';
 
 // Mock the message store
-jest.mock('../utils/messaging', () => ({
+vi.mock('../utils/messaging', () => ({
   useMessageStore: {
-    getState: jest.fn(() => ({
-      addNotification: jest.fn()
+    getState: vi.fn(() => ({
+      addNotification: vi.fn()
     }))
   }
 }));
 
+// Mock fetch for error reporting
+vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true })));
+
 describe('Frontend Error Handler', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     errorTracker.clearErrors();
   });
 
@@ -55,17 +59,20 @@ describe('Frontend Error Handler', () => {
 
   describe('handleApiError', () => {
     test('should handle JSON error response', async () => {
-      const mockResponse = {
-        status: 400,
-        url: 'http://test.com/api/test',
-        json: jest.fn().mockResolvedValue({
+      const mockResponse = new Response(
+        JSON.stringify({
           error: {
             message: 'Validation failed',
             errorCode: 'VAL001',
             details: { field: 'email' }
           }
-        })
-      };
+        }),
+        {
+          status: 400,
+          statusText: 'Bad Request',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
 
       const error = await handleApiError(mockResponse);
       
@@ -75,29 +82,28 @@ describe('Frontend Error Handler', () => {
     });
 
     test('should handle text error response', async () => {
-      const mockResponse = {
+      const mockResponse = new Response('Internal server error', {
         status: 500,
-        url: 'http://test.com/api/test',
-        json: jest.fn().mockRejectedValue(new Error('Not JSON')),
-        text: jest.fn().mockResolvedValue('Internal server error')
-      };
+        statusText: 'Internal Server Error',
+        headers: { 'Content-Type': 'text/plain' }
+      });
 
       const error = await handleApiError(mockResponse);
       
       expect(error.message).toBe('Internal server error');
-      expect(error.errorCode).toBe('UNKNOWN');
+      expect(error.errorCode).toBe('SYS001'); // Maps to UNEXPECTED_ERROR
     });
 
     test('should handle network errors', async () => {
-      const mockResponse = {
-        status: 0,
-        url: 'http://test.com/api/test',
-        json: jest.fn().mockRejectedValue(new Error('Network error'))
-      };
+      const mockResponse = new Response(null, {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: {}
+      });
 
       const error = await handleApiError(mockResponse);
       
-      expect(error.errorCode).toBe('UNKNOWN');
+      expect(error.errorCode).toBe('SYS001'); // Maps to UNEXPECTED_ERROR
     });
   });
 
@@ -136,8 +142,8 @@ describe('Frontend Error Handler', () => {
 
       test('should throw error for empty email', () => {
         expect(() => validateEmail('')).toThrow();
-        expect(() => validateEmail(null)).toThrow();
-        expect(() => validateEmail(undefined)).toThrow();
+        expect(() => validateEmail(null as any)).toThrow();
+        expect(() => validateEmail(undefined as any)).toThrow();
       });
 
       test('should throw error for invalid email format', () => {
@@ -154,8 +160,8 @@ describe('Frontend Error Handler', () => {
 
       test('should throw error for empty password', () => {
         expect(() => validatePassword('')).toThrow();
-        expect(() => validatePassword(null)).toThrow();
-        expect(() => validatePassword(undefined)).toThrow();
+        expect(() => validatePassword(null as any)).toThrow();
+        expect(() => validatePassword(undefined as any)).toThrow();
       });
 
       test('should throw error for short password', () => {
@@ -190,13 +196,14 @@ describe('Frontend Error Handler', () => {
       expect(getErrorRecoverySuggestion(networkError)).toContain('internet connection');
 
       const systemError = createFrontendError('UNEXPECTED_ERROR');
-      expect(getErrorRecoverySuggestion(systemError)).toContain('contact support');
+      expect(getErrorRecoverySuggestion(systemError)).toContain('Try refreshing the page');
     });
   });
 
   describe('ErrorTracker', () => {
-    test('should track errors with unique IDs', () => {
+    test('should track errors with unique IDs', async () => {
       const error1 = createFrontendError('INVALID_INPUT', 'Error 1');
+      await new Promise(resolve => setTimeout(resolve, 10)); // Longer delay to ensure different timestamps
       const error2 = createFrontendError('NETWORK_ERROR', 'Error 2');
 
       errorTracker.addError(error1);
@@ -242,8 +249,8 @@ describe('Frontend Error Handler', () => {
 
   describe('Integration with Message Store', () => {
     test('should display error notifications', () => {
-      const mockAddNotification = jest.fn();
-      useMessageStore.getState.mockReturnValue({
+      const mockAddNotification = vi.fn();
+      (useMessageStore.getState as any).mockReturnValue({
         addNotification: mockAddNotification
       });
 

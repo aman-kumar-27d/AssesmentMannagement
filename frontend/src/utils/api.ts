@@ -1,8 +1,7 @@
 import { 
   handleApiError, 
   handleNetworkError, 
-  createFrontendError,
-  displayError 
+  createFrontendError
 } from './errorHandler';
 
 // Base API URL
@@ -41,7 +40,7 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
     }
     
     // Re-throw if it's already a handled error
-    if (error.name === 'FrontendError') {
+    if (error instanceof Error && error.name === 'FrontendError') {
       throw error;
     }
     

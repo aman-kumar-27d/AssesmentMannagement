@@ -5,7 +5,7 @@ import { getAssessmentById, submitAssessment } from '../utils/api';
 import SecureNotepad from '../components/SecureNotepad';
 import Timer from '../components/Timer';
 import NotificationContainer from '../components/NotificationContainer';
-import { createAntiCheatMonitor, AntiCheatViolation, SessionActivity } from '../utils/antiCheat';
+import { createAntiCheatMonitor, AntiCheatViolation } from '../utils/antiCheat';
 import { showSuccess, showError, showWarning } from '../utils/messaging';
 
 interface QuestionOption {
@@ -74,9 +74,6 @@ const TakeAssessment = () => {
   const [hasMCQs, setHasMCQs] = useState(false);
   const [pageReloaded, setPageReloaded] = useState(false);
   const [antiCheatViolations, setAntiCheatViolations] = useState<AntiCheatViolation[]>([]);
-  const [sessionActivities, setSessionActivities] = useState<SessionActivity[]>([]);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [questionTimers, setQuestionTimers] = useState<Record<number, number>>({});
 
   // Initialize anti-cheat monitoring
   const handleAntiCheatViolation = useCallback((violation: AntiCheatViolation) => {
@@ -170,9 +167,7 @@ const TakeAssessment = () => {
       
       // Request fullscreen if enabled
       if (assessment.antiCheatEnabled) {
-        antiCheatMonitor.current.requestFullscreen().then(() => {
-          setIsFullscreen(true);
-        }).catch(err => {
+        antiCheatMonitor.current.requestFullscreen().catch(err => {
           console.warn('Fullscreen request denied:', err);
         });
       }
@@ -375,13 +370,12 @@ const TakeAssessment = () => {
 
       // Get anti-cheat data from monitor
       const violations = antiCheatMonitor.current?.getViolations() || antiCheatViolations;
-      const activities = antiCheatMonitor.current?.getActivities() || sessionActivities;
+      const activities = antiCheatMonitor.current?.getActivities() || [];
       const finalTabSwitches = antiCheatMonitor.current?.getTabSwitchCount() || tabSwitches;
       
       // Calculate time spent
       const startTime = startTimeRef.current || new Date(sessionStorage.getItem(SESSION_KEYS.START_TIME) || Date.now());
       const endTime = new Date();
-      const timeSpent = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
       
       await submitAssessment(
         user.token,

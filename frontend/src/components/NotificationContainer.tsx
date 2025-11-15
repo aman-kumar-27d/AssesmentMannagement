@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useMessageStore, NotificationMessage } from '../utils/messaging';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 

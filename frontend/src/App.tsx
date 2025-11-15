@@ -21,7 +21,7 @@ import { setupGlobalErrorHandlers } from './utils/errorHandler'
 import './App.css'
 
 // Protected route component
-const ProtectedRoute = ({ children, requireAdmin = false }) => {
+const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) => {
   const userData = localStorage.getItem('user');
   
   if (!userData) {

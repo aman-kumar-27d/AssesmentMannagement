@@ -17,6 +17,7 @@ interface AuthContextType {
   logout: () => void;
   register: (userId: string, email: string, password: string) => Promise<void>;
   registerAdmin: (userId: string, email: string, password: string, adminSecret?: string) => Promise<void>;
+  setUser: (user: User | null) => void;
 }
 
 // Export the AuthContext so it can be imported in test files
@@ -138,7 +139,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, logout, register, registerAdmin }}>
+    <AuthContext.Provider value={{ user, loading, error, login, logout, register, registerAdmin, setUser }}>
       {children}
     </AuthContext.Provider>
   );

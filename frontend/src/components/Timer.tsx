@@ -54,8 +54,6 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   const getTimeColor = (remainingSeconds: number): string => {
-    const percentage = remainingSeconds / totalSeconds;
-    
     if (remainingSeconds <= 30) return 'text-red-600';
     if (remainingSeconds <= 120) return 'text-orange-600';
     if (remainingSeconds <= 300) return 'text-yellow-600';
@@ -63,8 +61,6 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   const getProgressColor = (remainingSeconds: number): string => {
-    const percentage = remainingSeconds / totalSeconds;
-    
     if (remainingSeconds <= 30) return 'bg-red-500';
     if (remainingSeconds <= 120) return 'bg-orange-500';
     if (remainingSeconds <= 300) return 'bg-yellow-500';

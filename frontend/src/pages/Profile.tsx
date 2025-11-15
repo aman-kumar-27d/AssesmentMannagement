@@ -69,7 +69,7 @@ const Profile = () => {
       setProfileError(null);
       setProfileSuccess(null);
 
-      const data = await updateUserProfile(user.token, { userId, email });
+      await updateUserProfile(user.token, { userId, email });
       
       // Update the context with the new user data
       setUser({

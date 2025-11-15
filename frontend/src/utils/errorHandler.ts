@@ -1,7 +1,12 @@
 import { useMessageStore } from './messaging';
 
 export class FrontendError extends Error {
-  constructor(message, errorCode, details = null, userMessage = null) {
+  errorCode: string;
+  details: any;
+  userMessage: string | null;
+  timestamp: string;
+
+  constructor(message: string, errorCode: string, details: any = null, userMessage: string | null = null) {
     super(message);
     this.errorCode = errorCode;
     this.details = details;
@@ -51,15 +56,19 @@ const errorTypes = {
 
 // Error tracking and reporting
 class ErrorTracker {
+  errors: Array<{id: string, timestamp: string, error: any, context: any}>;
+  maxErrors: number;
+  reportingEndpoint: string;
+
   constructor() {
     this.errors = [];
     this.maxErrors = 100;
     this.reportingEndpoint = '/api/errors/report';
   }
 
-  addError(error, context = {}) {
+  addError(error: any, context = {}) {
     const errorEntry = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: new Date().toISOString(),
       error: {
         name: error.name,
@@ -88,13 +97,13 @@ class ErrorTracker {
     }
   }
 
-  shouldReportError(error) {
+  shouldReportError(error: any) {
     // Don't report user errors or network issues
     const nonReportableCodes = ['AUTH001', 'VAL001', 'ASM002', 'SEC001'];
     return !nonReportableCodes.includes(error.errorCode);
   }
 
-  async reportError(errorEntry) {
+  async reportError(errorEntry: any) {
     try {
       await fetch(this.reportingEndpoint, {
         method: 'POST',
@@ -121,8 +130,8 @@ class ErrorTracker {
 export const errorTracker = new ErrorTracker();
 
 // Create frontend error
-export const createFrontendError = (errorType, customMessage = null, details = null, context = {}) => {
-  const error = errorTypes[errorType];
+export const createFrontendError = (errorType: string, customMessage: string | null = null, details: Record<string, unknown> | null = null, context = {}) => {
+  const error = (errorTypes as any)[errorType];
   const frontendError = new FrontendError(
     customMessage || error.message,
     error.code,
@@ -137,23 +146,41 @@ export const createFrontendError = (errorType, customMessage = null, details = n
 };
 
 // Handle API errors
-export const handleApiError = async (response, context = {}) => {
-  let errorMessage = 'An error occurred';
+export const handleApiError = async (response: Response, context: Record<string, unknown> = {}) => {
+  let errorMessage = 'An unexpected error occurred';
   let errorCode = 'UNKNOWN';
-  let details = null;
+  let details: Record<string, unknown> = {};
 
-  try {
-    const errorData = await response.json();
-    errorMessage = errorData.error?.message || errorMessage;
-    errorCode = errorData.error?.errorCode || errorCode;
-    details = errorData.error?.details || details;
-  } catch (parseError) {
-    // Response is not JSON
-    errorMessage = await response.text() || errorMessage;
+  // Check content type to determine how to parse
+  const contentType = response.headers.get('content-type');
+  
+  if (contentType && contentType.includes('application/json')) {
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error?.message || errorMessage;
+      errorCode = errorData.error?.errorCode || errorCode;
+      details = errorData.error?.details || details;
+    } catch {
+      // JSON parsing failed, fall back to text
+      try {
+        const text = await response.text();
+        errorMessage = text || errorMessage;
+      } catch {
+        errorMessage = 'An unexpected error occurred';
+      }
+    }
+  } else {
+    // Not JSON, try to read as text
+    try {
+      const text = await response.text();
+      errorMessage = text || errorMessage;
+    } catch {
+      errorMessage = 'An unexpected error occurred';
+    }
   }
 
   const errorType = Object.keys(errorTypes).find(
-    key => errorTypes[key].code === errorCode
+    key => (errorTypes as any)[key].code === errorCode
   ) || 'UNEXPECTED_ERROR';
 
   return createFrontendError(errorType, errorMessage, details, {
@@ -164,7 +191,7 @@ export const handleApiError = async (response, context = {}) => {
 };
 
 // Handle network errors
-export const handleNetworkError = (error, context = {}) => {
+export const handleNetworkError = (error: any, context = {}) => {
   if (error.name === 'TypeError' && error.message.includes('fetch')) {
     return createFrontendError('NETWORK_ERROR', error.message, null, context);
   }
@@ -176,8 +203,14 @@ export const handleNetworkError = (error, context = {}) => {
   return createFrontendError('UNEXPECTED_ERROR', error.message, null, context);
 };
 
+interface DisplayErrorOptions {
+  showNotification?: boolean;
+  logToConsole?: boolean;
+  severity?: 'error' | 'warning' | 'info' | 'success';
+}
+
 // Display error to user
-export const displayError = (error, options = {}) => {
+export const displayError = (error: any, options: DisplayErrorOptions = {}) => {
   const { showNotification = true, logToConsole = true, severity = 'error' } = options;
 
   if (logToConsole) {
@@ -190,14 +223,13 @@ export const displayError = (error, options = {}) => {
       type: severity,
       title: 'Error',
       message: error.userMessage,
-      duration: 5000,
-      dismissible: true
+      duration: 5000
     });
   }
 };
 
 // Error boundary helper
-export const logErrorToService = (error, errorInfo) => {
+export const logErrorToService = (error: any, errorInfo: any) => {
   const errorEntry = {
     timestamp: new Date().toISOString(),
     error: {
@@ -215,13 +247,13 @@ export const logErrorToService = (error, errorInfo) => {
   errorTracker.addError(error, errorInfo);
   
   // Send to error reporting service in production
-  if (process.env.NODE_ENV === 'production') {
+  if (import.meta.env.PROD) {
     errorTracker.reportError(errorEntry);
   }
 };
 
 // Validation helpers
-export const validateEmail = (email) => {
+export const validateEmail = (email: string) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!email) {
     throw createFrontendError('REQUIRED_FIELD', 'Email is required');
@@ -232,7 +264,7 @@ export const validateEmail = (email) => {
   return true;
 };
 
-export const validatePassword = (password) => {
+export const validatePassword = (password: string) => {
   if (!password) {
     throw createFrontendError('REQUIRED_FIELD', 'Password is required');
   }
@@ -242,7 +274,7 @@ export const validatePassword = (password) => {
   return true;
 };
 
-export const validateRequiredField = (value, fieldName) => {
+export const validateRequiredField = (value: any, fieldName: string) => {
   if (!value || (typeof value === 'string' && value.trim() === '')) {
     throw createFrontendError('REQUIRED_FIELD', `${fieldName} is required`);
   }
@@ -250,8 +282,8 @@ export const validateRequiredField = (value, fieldName) => {
 };
 
 // Error recovery suggestions
-export const getErrorRecoverySuggestion = (error) => {
-  const suggestions = {
+export const getErrorRecoverySuggestion = (error: any) => {
+  const suggestions: Record<string, string> = {
     'AUTH001': 'Try logging in again or contact support if you continue to have issues.',
     'AUTH002': 'Please log in again to refresh your session.',
     'NET001': 'Check your internet connection and refresh the page.',
