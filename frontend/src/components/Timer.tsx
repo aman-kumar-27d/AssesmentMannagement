@@ -5,6 +5,7 @@ export interface TimerProps {
   totalSeconds: number;
   onTimeUp: () => void;
   onTimeWarning?: (remainingSeconds: number) => void;
+  onTimeUpdate?: (remainingSeconds: number) => void; // Callback for time updates
   warningThresholds?: number[]; // Warning at these remaining seconds
   autoPauseOnBlur?: boolean;
   showProgress?: boolean;
@@ -25,6 +26,7 @@ const Timer: React.FC<TimerProps> = ({
   totalSeconds,
   onTimeUp,
   onTimeWarning,
+  onTimeUpdate,
   warningThresholds = [300, 120, 60, 30], // 5min, 2min, 1min, 30sec
   autoPauseOnBlur = false,
   showProgress = true,
@@ -96,6 +98,11 @@ const Timer: React.FC<TimerProps> = ({
         }
 
         checkWarnings(newRemaining);
+        
+        // Notify parent component of time update
+        if (onTimeUpdate) {
+          onTimeUpdate(newRemaining);
+        }
 
         return {
           ...prev,
@@ -106,7 +113,7 @@ const Timer: React.FC<TimerProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [state.isRunning, state.isPaused, onTimeUp, checkWarnings]);
+  }, [state.isRunning, state.isPaused, onTimeUp, checkWarnings, onTimeUpdate]);
 
   useEffect(() => {
     if (autoPauseOnBlur) {

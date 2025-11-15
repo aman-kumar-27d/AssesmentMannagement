@@ -190,6 +190,11 @@ const TakeAssessment = () => {
     }
   }, []);
 
+  // Handle time updates from Timer component
+  const handleTimeUpdate = useCallback((remainingSeconds: number) => {
+    setTimeRemaining(remainingSeconds);
+  }, []);
+
   // Handle time up
   const handleTimeUp = useCallback(() => {
     showError('Time\'s Up!', 'The assessment time has expired. Your submission will be automatically submitted.');
@@ -290,23 +295,8 @@ const TakeAssessment = () => {
     }
   }, [selectedOptions]);
 
-  // Timer countdown
-  useEffect(() => {
-    if (!assessment || timeRemaining <= 0) return;
-
-    const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleSubmit(true); // Auto-submit when time runs out
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [assessment, timeRemaining]);
+  // Timer countdown - REMOVED: Timer component handles all timing logic
+  // The Timer component calls handleTimeUp which calls handleSubmit when time expires
 
   // Tab switch detection
   useEffect(() => {
@@ -504,6 +494,7 @@ const TakeAssessment = () => {
             totalSeconds={timeRemaining}
             onTimeUp={handleTimeUp}
             onTimeWarning={handleTimeWarning}
+            onTimeUpdate={handleTimeUpdate}
             warningThresholds={[300, 120, 60, 30]}
             autoPauseOnBlur={assessment?.antiCheatEnabled}
             showProgress={true}
