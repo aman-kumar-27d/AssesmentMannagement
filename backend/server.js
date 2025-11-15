@@ -1,3 +1,15 @@
+// Global error handlers at the very beginning
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION at startup:', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('UNHANDLED REJECTION at startup:', reason);
+  process.exit(1);
+});
+
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
@@ -18,9 +30,7 @@ const errorRoutes = require('./routes/errorRoutes');
 // Load environment variables
 dotenv.config();
 
-// Connect to database
-connectDB();
-
+// Create Express app
 const app = express();
 
 // Security middleware
@@ -86,7 +96,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Handle undefined routes
-app.use('*', notFound);
+app.use(notFound);
 
 // Global error handling middleware
 app.use(globalErrorHandler);
@@ -100,9 +110,13 @@ process.on('unhandledRejection', (err, promise) => {
   });
   
   // Close server & exit process
-  server.close(() => {
+  if (server && server.close) {
+    server.close(() => {
+      process.exit(1);
+    });
+  } else {
     process.exit(1);
-  });
+  }
 });
 
 // Handle uncaught exceptions
@@ -116,14 +130,39 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-// Start server
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`, {
-    port: PORT,
-    environment: process.env.NODE_ENV || 'development',
-    timestamp: new Date().toISOString()
-  });
-});
+// Start server after database connection
+const startServer = async () => {
+  try {
+    await connectDB();
+    
+    const PORT = process.env.PORT || 5000;
+    const server = app.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`, {
+        port: PORT,
+        environment: process.env.NODE_ENV || 'development',
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    server.on('error', (error) => {
+      logger.error('Server startup failed', {
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
+      process.exit(1);
+    });
+    
+  } catch (error) {
+    logger.error('Server startup failed', {
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app;
