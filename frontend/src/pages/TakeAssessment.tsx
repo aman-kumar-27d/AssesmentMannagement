@@ -51,7 +51,8 @@ const SESSION_KEYS = {
   ASSESSMENT_ID: 'assessment_id',
   TAB_SWITCHES: 'assessment_tab_switches',
   SELECTED_OPTIONS: 'assessment_selected_options',
-  CONTENT: 'assessment_content',
+  CONTENT: 'assessment_content', // Legacy key for backward compatibility
+  QUESTION_CONTENT: 'assessment_question_content',
   INITIAL_VISIT: 'assessment_initial_visit',
 };
 
@@ -64,7 +65,7 @@ const TakeAssessment = () => {
   const startTimeRef = useRef<Date | null>(null);
 
   const [assessment, setAssessment] = useState<Assessment | null>(null);
-  const [content, setContent] = useState('');
+  const [questionContent, setQuestionContent] = useState<Record<number, string>>({});
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -117,6 +118,7 @@ const TakeAssessment = () => {
         sessionStorage.setItem(SESSION_KEYS.ASSESSMENT_ID, id || '');
         sessionStorage.setItem(SESSION_KEYS.START_TIME, Date.now().toString());
         sessionStorage.setItem(SESSION_KEYS.TAB_SWITCHES, '0');
+        startTimeRef.current = new Date();
         return false;
       } else {
         // Not first visit, check if we have a started assessment with same ID
@@ -130,10 +132,19 @@ const TakeAssessment = () => {
             setTabSwitches(parseInt(savedTabSwitches, 10) || 0);
           }
           
+          // Set start time from session storage
+          const savedStartTime = sessionStorage.getItem(SESSION_KEYS.START_TIME);
+          if (savedStartTime) {
+            const parsedTime = parseInt(savedStartTime, 10);
+            if (!isNaN(parsedTime)) {
+              startTimeRef.current = new Date(parsedTime);
+            }
+          }
+          
           // Get saved content if any
           const savedContent = sessionStorage.getItem(SESSION_KEYS.CONTENT);
           if (savedContent) {
-            setContent(savedContent);
+            // Legacy content loading removed - using individual question content now
           }
           
           // Get saved selected options if any
@@ -152,6 +163,7 @@ const TakeAssessment = () => {
           sessionStorage.setItem(SESSION_KEYS.ASSESSMENT_ID, id || '');
           sessionStorage.setItem(SESSION_KEYS.START_TIME, Date.now().toString());
           sessionStorage.setItem(SESSION_KEYS.TAB_SWITCHES, '0');
+          startTimeRef.current = new Date();
           return false;
         }
       }
@@ -235,9 +247,15 @@ const TakeAssessment = () => {
           const elapsedSeconds = Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
           const remainingSeconds = Math.max(0, processedAssessment.timeLimit * 60 - elapsedSeconds);
           setTimeRemaining(remainingSeconds);
+          // Set the startTimeRef
+          const parsedTime = parseInt(startTime, 10);
+          if (!isNaN(parsedTime)) {
+            startTimeRef.current = new Date(parsedTime);
+          }
         } else {
           setTimeRemaining(processedAssessment.timeLimit * 60); // Convert to seconds
           sessionStorage.setItem(SESSION_KEYS.START_TIME, Date.now().toString());
+          startTimeRef.current = new Date();
         }
         
         // Check if assessment has MCQs
@@ -259,6 +277,17 @@ const TakeAssessment = () => {
           } else {
             initializeEmptyOptions(processedAssessment.questions);
           }
+          
+          // Load saved question content
+          const savedContent = sessionStorage.getItem(SESSION_KEYS.QUESTION_CONTENT);
+          if (savedContent) {
+            try {
+              setQuestionContent(JSON.parse(savedContent));
+            } catch (e) {
+              console.error("Could not parse saved question content", e);
+            }
+          }
+          
           hasInitialized.current = true;
         }
       } catch (err: any) {
@@ -282,12 +311,7 @@ const TakeAssessment = () => {
     fetchAssessment();
   }, [user, id]); // Removed selectedOptions from dependencies
 
-  // Save content to session storage when it changes
-  useEffect(() => {
-    if (content) {
-      sessionStorage.setItem(SESSION_KEYS.CONTENT, content);
-    }
-  }, [content]);
+  
 
   // Save selected options to session storage when they change
   useEffect(() => {
@@ -295,6 +319,21 @@ const TakeAssessment = () => {
       sessionStorage.setItem(SESSION_KEYS.SELECTED_OPTIONS, JSON.stringify(selectedOptions));
     }
   }, [selectedOptions]);
+
+  // Save question content to session storage when it changes
+  useEffect(() => {
+    if (Object.keys(questionContent).length > 0) {
+      sessionStorage.setItem(SESSION_KEYS.QUESTION_CONTENT, JSON.stringify(questionContent));
+    }
+  }, [questionContent]);
+
+  // Handle individual question content updates
+  const handleQuestionContentChange = (questionIndex: number, content: string) => {
+    setQuestionContent(prev => ({
+      ...prev,
+      [questionIndex]: content
+    }));
+  };
 
   // Timer countdown - REMOVED: Timer component handles all timing logic
   // The Timer component calls handleTimeUp which calls handleSubmit when time expires
@@ -361,8 +400,11 @@ const TakeAssessment = () => {
     
     // Check for empty code content if there are descriptive questions
     const hasDescriptiveQuestions = assessment.questions.some(q => q.type === 'descriptive');
-    if (hasDescriptiveQuestions && content.trim() === '') {
-      warnings.push('Your code solution appears to be empty');
+    if (hasDescriptiveQuestions) {
+      const hasAnyContent = Object.values(questionContent).some(content => content.trim().length > 0);
+      if (!hasAnyContent) {
+        warnings.push('Your code solution appears to be empty');
+      }
     }
     
     return {
@@ -411,11 +453,21 @@ const TakeAssessment = () => {
         }, 100);
       }
       
-      // Prepare submission data
-      let submissionContent = content;
+      // Prepare submission data - combine all question content
+      let submissionContent = '';
+      const descriptiveQuestions = assessment?.questions.filter(q => q.type !== 'mcq') || [];
       
-      // If this is an MCQ-only assessment, send a placeholder message for content
-      if (hasMCQs && content.trim() === '') {
+      if (descriptiveQuestions.length > 0) {
+        // Build submission content from individual question responses
+        submissionContent = descriptiveQuestions.map((question) => {
+          const questionIndex = assessment!.questions.indexOf(question);
+          const content = questionContent[questionIndex] || '';
+          return `Question ${questionIndex + 1}: ${question.questionText}\n\n${content}\n\n---\n\n`;
+        }).join('');
+      }
+      
+      // If this is an MCQ-only assessment or no descriptive content, send a placeholder
+      if (submissionContent.trim() === '') {
         submissionContent = "MCQ Assessment Submission";
       }
 
@@ -424,8 +476,25 @@ const TakeAssessment = () => {
       const activities = antiCheatMonitor.current?.getActivities() || [];
       const finalTabSwitches = antiCheatMonitor.current?.getTabSwitchCount() || tabSwitches;
       
-      // Calculate time spent
-      const startTime = startTimeRef.current || new Date(sessionStorage.getItem(SESSION_KEYS.START_TIME) || Date.now());
+      // Calculate time spent with proper error handling
+      let startTime: Date;
+      const sessionStartTime = sessionStorage.getItem(SESSION_KEYS.START_TIME);
+      
+      if (startTimeRef.current) {
+        startTime = startTimeRef.current;
+      } else if (sessionStartTime) {
+        const parsedTime = parseInt(sessionStartTime, 10);
+        if (!isNaN(parsedTime)) {
+          startTime = new Date(parsedTime);
+        } else {
+          startTime = new Date();
+          assessmentLogger.logAssessmentError(id || '', user?._id || '', new Error('Invalid start time in session storage'), sessionStartTime);
+        }
+      } else {
+        startTime = new Date();
+        assessmentLogger.logAssessmentError(id || '', user?._id || '', new Error('No start time found, using current time'));
+      }
+      
       const endTime = new Date();
       
       await submitAssessment(
@@ -446,7 +515,7 @@ const TakeAssessment = () => {
       sessionStorage.removeItem(SESSION_KEYS.START_TIME);
       sessionStorage.removeItem(SESSION_KEYS.TAB_SWITCHES);
       sessionStorage.removeItem(SESSION_KEYS.SELECTED_OPTIONS);
-      sessionStorage.removeItem(SESSION_KEYS.CONTENT);
+      sessionStorage.removeItem(SESSION_KEYS.QUESTION_CONTENT);
       // Keep the initial visit flag so we can detect actual page reloads
       
       // Show success message
@@ -594,9 +663,18 @@ const TakeAssessment = () => {
       {/* Main content with padding for the fixed header */}
       <div className="pt-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pb-20">
         {pageReloaded && (
-          <div className="mb-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
-            <p className="font-medium">⚠️ Warning: Page Refresh Detected</p>
-            <p>Please avoid refreshing the page during an assessment. Your progress has been preserved.</p>
+          <div className="mb-6 p-4 bg-gradient-to-r from-red-50 to-orange-50 border-l-4 border-red-500 rounded-r-lg shadow-sm">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Page Refresh Detected</h3>
+                <p className="text-sm text-red-700 mt-1">Please avoid refreshing the page during an assessment. Your progress has been preserved.</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -616,18 +694,33 @@ const TakeAssessment = () => {
         </div>
         
         <div className="mb-8">
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200">
-              <h2 className="text-lg font-medium text-gray-900">Instructions</h2>
+          <div className="bg-gradient-to-br from-white to-gray-50 shadow-lg rounded-xl overflow-hidden border border-gray-100">
+            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                <svg className="h-5 w-5 text-blue-600 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                Assessment Instructions
+              </h2>
             </div>
-            <div className="px-6 py-5">
-              <p className="text-gray-700 whitespace-pre-wrap">{assessment.description}</p>
+            <div className="px-6 py-6">
+              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{assessment.description}</p>
               
               {tabSwitches > 0 && (
-                <div className="mt-4 p-3 bg-yellow-50 border-l-4 border-yellow-400">
-                  <p className="text-sm text-yellow-700">
-                    <strong>Warning:</strong> You have switched tabs {tabSwitches} time(s). This will be recorded with your submission.
-                  </p>
+                <div className="mt-6 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-400 rounded-r-lg shadow-sm">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-yellow-800">Tab Switch Detected</h3>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        You have switched tabs <span className="font-semibold">{tabSwitches} time(s)</span>. This activity will be recorded with your submission.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -643,23 +736,40 @@ const TakeAssessment = () => {
         </div>
 
         {/* Questions Display */}
-        <div className="mb-8 space-y-6">
+        <div className="mb-8 space-y-8">
           {assessment.questions.map((question, index) => (
-            <div key={index} className="bg-white shadow rounded-lg p-6">
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Question {index + 1}: {question.questionText}
-                </h3>
-                {question.categoryName && (
-                  <span className="inline-block bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
-                    {question.categoryName}
-                  </span>
-                )}
-                <div className="text-sm text-gray-500 mt-2">Points: {question.maxPoints}</div>
+            <div key={index} className="bg-gradient-to-br from-white to-gray-50 shadow-xl rounded-2xl p-8 border border-gray-100 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+              <div className="mb-6">
+                <div className="flex items-start justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900 leading-tight">
+                    <span className="text-blue-600 font-extrabold">Question {index + 1}:</span> {question.questionText}
+                  </h3>
+                  <div className="flex items-center space-x-3">
+                    {question.categoryName && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 border border-blue-200">
+                        <svg className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M17.707 9.293a1 1 0 010 1.414l-7 7a1 1 0 01-1.414 0l-7-7A.997.997 0 012 10V5a3 3 0 013-3h5c.256 0 .512.098.707.293l7 7zM5 6a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                        </svg>
+                        {question.categoryName}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-gradient-to-r from-green-100 to-emerald-100 text-green-800 border border-green-200">
+                      <svg className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      {question.maxPoints} pts
+                    </span>
+                  </div>
+                </div>
               </div>
               
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-4 mb-4">
-                <p className="text-gray-700">{question.instructions}</p>
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-6 mb-6 shadow-inner">
+                <div className="flex items-start">
+                  <svg className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                  <p className="text-gray-700 leading-relaxed">{question.instructions}</p>
+                </div>
               </div>
               
               {question.type === 'mcq' && question.options && (
@@ -721,37 +831,67 @@ const TakeAssessment = () => {
                   </fieldset>
                 </div>
               )}
+              
+              {/* Individual editor for descriptive questions */}
+              {question.type !== 'mcq' && (
+                <div className="mt-8">
+                  <div className="flex items-center mb-4">
+                    <svg className="h-5 w-5 text-green-600 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    <h4 className="text-lg font-semibold text-gray-900">Your Answer:</h4>
+                  </div>
+                  <div className="h-80 border-2 border-gray-200 rounded-xl shadow-inner bg-white overflow-hidden">
+                    <SecureNotepad 
+                      value={questionContent[index] || ''} 
+                      onChange={(content) => handleQuestionContentChange(index, content)} 
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center text-sm text-gray-500">
+                    <svg className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    Type your response in the editor above. Your work is automatically saved.
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        {/* Code editor for descriptive responses */}
-        {!hasMCQs || assessment.questions.some(q => q.type === 'descriptive') ? (
-          <div className="bg-white shadow rounded-lg p-6 mb-8">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Your Solution</h3>
-            <div className="h-96">
-              <SecureNotepad value={content} onChange={setContent} />
-            </div>
-          </div>
-        ) : null}
+        {/* Individual editors are now rendered within each question */}
         
         {/* Submit button */}
-        <div className="flex justify-end mt-6">
+        <div className="flex justify-end mt-8">
           <button
             onClick={() => handleSubmit()}
             disabled={isSubmitting}
-            className={`px-6 py-3 bg-blue-600 text-white rounded-md shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-              isSubmitting ? 'opacity-75 cursor-not-allowed' : ''
+            className={`group relative inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl shadow-lg hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50 transform hover:-translate-y-1 transition-all duration-200 ${
+              isSubmitting ? 'opacity-75 cursor-not-allowed transform-none' : ''
             }`}
           >
-            {isSubmitting ? 'Submitting...' : 'Submit Assessment'}
+            <span className="absolute left-0 inset-y-0 flex items-center pl-3">
+              {isSubmitting ? (
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : (
+                <svg className="h-5 w-5 text-white group-hover:text-blue-100" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </span>
+            <span className="ml-8">
+              {isSubmitting ? 'Submitting Assessment...' : 'Submit Assessment'}
+            </span>
           </button>
         </div>
 
         {/* Confirmation dialog */}
         {showConfirmSubmit && (
           <div 
-            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+            className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn"
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-submission-title"
@@ -759,38 +899,65 @@ const TakeAssessment = () => {
             onClick={handleModalClose}
           >
             <div 
-              className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+              className="bg-white rounded-2xl p-8 max-w-lg w-full mx-4 shadow-2xl transform animate-scaleIn"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 
-                id="confirm-submission-title"
-                className="text-lg font-medium text-gray-900 mb-4"
-              >
-                Confirm Submission
-              </h3>
-              <p 
-                id="confirm-submission-description"
-                className="text-gray-700 mb-6"
-              >
-                Are you sure you want to submit your assessment? You cannot make changes after submission.
-              </p>
-              <div className="flex justify-end space-x-4">
+              <div className="text-center mb-6">
+                <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-gradient-to-r from-yellow-100 to-orange-100 mb-4">
+                  <svg className="h-8 w-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h3 
+                  id="confirm-submission-title"
+                  className="text-2xl font-bold text-gray-900 mb-3"
+                >
+                  Ready to Submit?
+                </h3>
+                <p 
+                  id="confirm-submission-description"
+                  className="text-gray-600 leading-relaxed"
+                >
+                  Are you sure you want to submit your assessment? This action cannot be undone and you won't be able to make any changes after submission.
+                </p>
+              </div>
+              
+              <div className="bg-gray-50 rounded-xl p-4 mb-6">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Questions Answered:</span>
+                  <span className="font-semibold text-gray-900">
+                    {Object.keys(selectedOptions).filter(key => selectedOptions[key as any].length > 0).length + Object.keys(questionContent).filter(key => questionContent[key as any].trim().length > 0).length} / {assessment.questions.length}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex space-x-4">
                 <button
                   onClick={handleModalClose}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                  className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-gray-500 focus:ring-opacity-25 transition-all duration-200 transform hover:-translate-y-0.5"
                   disabled={isSubmitting}
                   type="button"
                 >
-                  Cancel
+                  Go Back
                 </button>
                 <button
                   onClick={() => handleSubmit()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold rounded-xl hover:from-green-700 hover:to-emerald-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-25 transition-all duration-200 transform hover:-translate-y-0.5 disabled:opacity-75 disabled:cursor-not-allowed disabled:transform-none"
                   disabled={isSubmitting}
                   type="button"
                   autoFocus
                 >
-                  {isSubmitting ? 'Submitting...' : 'Confirm Submit'}
+                  {isSubmitting ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Submitting...
+                    </span>
+                  ) : (
+                    'Submit Now'
+                  )}
                 </button>
               </div>
             </div>

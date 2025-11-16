@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, AlertTriangle, Pause, Play, RefreshCw } from 'lucide-react';
+import { Clock, AlertTriangle } from 'lucide-react';
 
 export interface TimerProps {
   totalSeconds: number;
@@ -128,28 +128,6 @@ const Timer: React.FC<TimerProps> = ({
       return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }
   }, [autoPauseOnBlur]);
-
-  // Removed manual timer controls - timer is now strictly controlled by assessment logic
-  const start = () => {
-    // Timer auto-starts, this function is deprecated but kept for compatibility
-    setState(prev => ({
-      ...prev,
-      isRunning: true,
-      isPaused: false,
-    }));
-  };
-
-  const pause = () => {
-    // Timer cannot be manually paused during assessment
-    // This function is deprecated but kept for compatibility
-    console.warn('Manual timer pause is not allowed during assessment');
-  };
-
-  const reset = () => {
-    // Timer cannot be manually reset during assessment
-    // This function is deprecated but kept for compatibility
-    console.warn('Manual timer reset is not allowed during assessment');
-  };
 
   const getSizeClasses = () => {
     switch (size) {
